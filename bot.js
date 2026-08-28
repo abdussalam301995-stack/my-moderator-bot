@@ -1,4 +1,7 @@
+require('dotenv').config();
 const express = require('express');
+const { Telegraf, Markup } = require('telegraf');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -9,8 +12,6 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
 });
-require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
 
 // Initialize Bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -27,7 +28,81 @@ bot.start((ctx) => {
     ctx.reply('မင်္ဂလာပါ။ Advanced Admin-Approval Group Moderator Bot အဆင်သင့် ဖြစ်ပါပြီ။');
 });
 
-// Message Monitoring
+// --- ၁။ စာရိုက်၍ခေါ်သော (Inline Bot / via bot) များကို ချက်ချင်းဖျက်ခြင်း ---
+bot.use(async (ctx, next) => {
+    if (ctx.message && ctx.message.via_bot) {
+        try {
+            const member = await ctx.getChatMember(ctx.from.id);
+            if (member.status === 'creator' || member.status === 'administrator') {
+                return next(); // Admin ခေါ်လျှင် ခွင့်ပြုမည်
+            }
+        } catch (e) {}
+
+        try {
+            await ctx.deleteMessage();
+            return; // Admin မဟုတ်ဘဲ Bot ခေါ်သုံးလျှင် ချက်ချင်းဖျက်ပြီး ရပ်မည်
+        } catch (err) {
+            console.log('Error deleting via_bot message:', err);
+        }
+    }
+    return next();
+});
+
+// --- ၂။ /ban Command (အပြီးထုတ်ရန်) ---
+bot.command('ban', async (ctx) => {
+    if (ctx.chat.type === 'private') return;
+    if (!ctx.message.reply_to_message) return ctx.reply('💡 Ban လုပ်လိုသူ၏ မက်ဆေ့ခ်ျကို Reply ဆွဲပြီး /ban ဟု ရိုက်ထည့်ပါ။');
+
+    const commanderId = ctx.from.id;
+    const targetUser = ctx.message.reply_to_message.from;
+    const targetId = targetUser.id;
+
+    try {
+        const commanderMember = await ctx.getChatMember(commanderId);
+        if (commanderMember.status !== 'creator' && commanderMember.status !== 'administrator') return;
+
+        const targetMember = await ctx.getChatMember(targetId);
+        if (targetMember.status === 'creator' || targetMember.status === 'administrator') return ctx.reply('🚫 Admin အချင်းချင်း Ban ၍ မရပါ။');
+
+        await ctx.banChatMember(targetId);
+        await ctx.deleteMessage(ctx.message.reply_to_message.message_id).catch(() => {});
+        await ctx.deleteMessage(ctx.message.message_id).catch(() => {});
+        await ctx.reply(`✅ [ ${targetUser.first_name} ] ကို Group မှ အောင်မြင်စွာ ဖယ်ရှားလိုက်ပါပြီ။`);
+    } catch (err) {
+        console.log('Error in /ban:', err);
+    }
+});
+
+// --- ၃။ /mute Command (၂၄ နာရီ စာပို့ခွင့်ပိတ်ရန်) ---
+bot.command('mute', async (ctx) => {
+    if (ctx.chat.type === 'private') return;
+    if (!ctx.message.reply_to_message) return ctx.reply('💡 Mute လုပ်လိုသူ၏ မက်ဆေ့ခ်ျကို Reply ဆွဲပြီး /mute ဟု ရိုက်ထည့်ပါ။');
+
+    const commanderId = ctx.from.id;
+    const targetUser = ctx.message.reply_to_message.from;
+    const targetId = targetUser.id;
+
+    try {
+        const commanderMember = await ctx.getChatMember(commanderId);
+        if (commanderMember.status !== 'creator' && commanderMember.status !== 'administrator') return;
+
+        const targetMember = await ctx.getChatMember(targetId);
+        if (targetMember.status === 'creator' || targetMember.status === 'administrator') return ctx.reply('🚫 Admin အချင်းချင်း Mute ၍ မရပါ။');
+
+        const untilDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
+        await ctx.restrictChatMember(targetId, {
+            permissions: { can_send_messages: false, can_send_media_messages: false, can_send_other_messages: false, can_add_web_page_previews: false },
+            until_date: untilDate
+        });
+        await ctx.deleteMessage(ctx.message.reply_to_message.message_id).catch(() => {});
+        await ctx.deleteMessage(ctx.message.message_id).catch(() => {});
+        await ctx.reply(`🤐 [ ${targetUser.first_name} ] ကို ၂၄ နာရီ စာပို့ခွင့် ပိတ်လိုက်ပါပြီ။`);
+    } catch (err) {
+        console.log('Error in /mute:', err);
+    }
+});
+
+// --- ၄။ Message Monitoring (Link & Bad Words) ---
 bot.on('text', async (ctx) => {
     if (ctx.chat.type === 'private') return;
 
@@ -43,8 +118,12 @@ bot.on('text', async (ctx) => {
         if (chatMember.status === 'creator' || chatMember.status === 'administrator') return;
     } catch (e) {}
 
-    // A. Bad Words Check
-    const badWords = ['လီး', 'ငါလိုး', 'ငါလိုးမ', 'မအေလိုး', 'စောက်ရူး', 'နှမလိုး', 'bitch', 'fuck you', 'fuck'];
+    // A. Bad Words Check (စကားလုံးအသစ်များ ထပ်တိုးထားပါသည်)
+    const badWords = [
+        'လီး', 'ငါလိုး', 'ငါလိုးမ', 'မအေလိုး', 'စောက်ရူး', 'နှမလိုး', 'bitch', 'fuck you', 'fuck',
+        'မအေယိုး', 'မအေရိုး', 'ဖာခံ', 'ဖာသည်', 'ဖင်ခံ', 'ငါယိုးမ', 'ငါရိုးမ', 'နှမိုးလ',
+        'dick', 'pussy', 'sex', 'ass', 'အီး', 'ချီး', 'သေး', 'လိင်တံ', 'လရည်'
+    ];
     const containsBadWord = badWords.some(word => messageTextLower.includes(word));
 
     // B. Link Check
@@ -85,29 +164,28 @@ bot.on('text', async (ctx) => {
         pendingPunishments.set(actionId, { chatId, userId, userName, warnings });
 
        for (const adminId of ADMIN_IDS) {
-    try {
-        await ctx.telegram.sendMessage(
-            adminId,
-            `🚨 **စည်းကမ်းဖောက်ဖျက်မှု အတည်ပြုရန်**\n\n- အသုံးပြုသူ: ${userName} (ID: ${userId})\n- အကြောင်းရင်း: ${violationReason}\n- ချိုးဖောက်မှုအကြိမ်ရေ: ${warnings} ကြိမ်\n- အကြံပြုအရေးယူမှု: **${punishmentType}**\n- မူရင်းစာသား: "${messageText}"`,
-            {
-                
-                ...Markup.inlineKeyboard([
-                    [Markup.button.callback('✅ အတည်ပြုမည် (Approve)', `approve_${actionId}`)],
-                    [Markup.button.callback('❌ ပယ်ချမည် (Reject)', `reject_${actionId}`)]
-                ])
+            try {
+                await ctx.telegram.sendMessage(
+                    adminId,
+                    `🚨 **စည်းကမ်းဖောက်ဖျက်မှု အတည်ပြုရန်**\n\n- အသုံးပြုသူ: ${userName} (ID: ${userId})\n- အကြောင်းရင်း: ${violationReason}\n- ချိုးဖောက်မှုအကြိမ်ရေ: ${warnings} ကြိမ်\n- အကြံပြုအရေးယူမှု: **${punishmentType}**\n- မူရင်းစာသား: "${messageText}"`,
+                    {
+                        ...Markup.inlineKeyboard([
+                            [Markup.button.callback('✅ အတည်ပြုမည် (Approve)', `approve_${actionId}`)],
+                            [Markup.button.callback('❌ ပယ်ချမည် (Reject)', `reject_${actionId}`)]
+                        ])
+                    }
+                );
+            } catch (e) {
+                console.log(`Admin (ID: ${adminId}) ဆီသို့ မက်ဆေ့ခ်ျပို့၍ မရပါ။`);
             }
-        );
-    } catch (e) {
-        console.log(`Admin (ID: ${adminId}) ဆီသို့ မက်ဆေ့ခ်ျပို့၍ မရပါ။ အကြောင်းရင်း:`, e.message);
-    }
-}
+        }
 
         const msg = await ctx.reply(`${userName}၊ သင့်၏ မက်ဆေ့ခ်ျသည် စည်းကမ်းနှင့် မကိုက်ညီသဖြင့် ဖျက်လိုက်ပါပြီ။ Admin ၏ ဆုံးဖြတ်ချက်ကို စောင့်ဆိုင်းနေပါသည်။`);
         setTimeout(() => ctx.telegram.deleteMessage(chatId, msg.message_id).catch(() => {}), 6000);
     }
 });
 
-// Admin Decision Handling
+// Admin Decision Handling (မူလအတိုင်း)
 bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
     const adminId = ctx.from.id;
@@ -146,10 +224,23 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery();
 });
 
-bot.on('new_chat_members', (ctx) => {
-    ctx.message.new_chat_members.forEach((member) => {
-        ctx.reply(`မင်္ဂလာပါ ${member.first_name}၊ Group ထဲကို ကြိုဆိုပါတယ်။ စည်းကမ်းများကို လိုက်နာပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။`);
-    });
+// --- ၅။ Anti-Bot နှင့် Welcome Message ---
+bot.on('new_chat_members', async (ctx) => {
+    const newMembers = ctx.message.new_chat_members;
+    
+    for (const member of newMembers) {
+        if (member.is_bot && member.id !== ctx.botInfo.id) {
+            try {
+                await ctx.banChatMember(member.id); // အခြား Bot ဆိုရင် ချက်ချင်း Ban မည်
+                await ctx.reply(`🚫 အခြား Bot အကောင့်များ ဝင်ခွင့်မပြုသောကြောင့် [ ${member.first_name} ] ကို ဖယ်ရှားလိုက်ပါတယ်။`);
+            } catch (err) {
+                console.log('Bot ကို ဖယ်ရှားရာတွင် Error တက်နေပါသည်:', err);
+            }
+        } else if (!member.is_bot) {
+            // လူအစစ်ဆိုလျှင် ပုံမှန်အတိုင်း နှုတ်ဆက်မည်
+            ctx.reply(`မင်္ဂလာပါ ${member.first_name}၊ Group ထဲကို ကြိုဆိုပါတယ်။ စည်းကမ်းများကို လိုက်နာပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။`);
+        }
+    }
 });
 
 bot.launch();
