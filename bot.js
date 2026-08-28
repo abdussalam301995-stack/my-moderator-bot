@@ -33,7 +33,7 @@ bot.use(async (ctx, next) => {
     if (ctx.message && ctx.message.via_bot) {
         try {
             const member = await ctx.getChatMember(ctx.from.id);
-            if (member.status === 'creator' || member.status === 'administrator') {
+            if (member.status === 'creator' || member.status === 'administrator' || ADMIN_IDS.includes(ctx.from.id)) {
                 return next(); // Admin ခေါ်လျှင် ခွင့်ပြုမည်
             }
         } catch (e) {}
@@ -54,22 +54,30 @@ bot.command('ban', async (ctx) => {
     if (!ctx.message.reply_to_message) return ctx.reply('💡 Ban လုပ်လိုသူ၏ မက်ဆေ့ခ်ျကို Reply ဆွဲပြီး /ban ဟု ရိုက်ထည့်ပါ။');
 
     const commanderId = ctx.from.id;
-    const targetUser = ctx.message.reply_to_message.from;
+    const replyMsg = ctx.message.reply_to_message;
+    if (replyMsg.sender_chat) return ctx.reply('🚫 Channel မက်ဆေ့ခ်ျကို Ban ၍မရပါ။');
+
+    const targetUser = replyMsg.from;
     const targetId = targetUser.id;
 
     try {
         const commanderMember = await ctx.getChatMember(commanderId);
-        if (commanderMember.status !== 'creator' && commanderMember.status !== 'administrator') return;
+        if (commanderMember.status !== 'creator' && commanderMember.status !== 'administrator' && !ADMIN_IDS.includes(commanderId)) {
+            return ctx.reply('🚫 သင်သည် Admin မဟုတ်ပါ။');
+        }
 
-        const targetMember = await ctx.getChatMember(targetId);
-        if (targetMember.status === 'creator' || targetMember.status === 'administrator') return ctx.reply('🚫 Admin အချင်းချင်း Ban ၍ မရပါ။');
+        const targetMember = await ctx.getChatMember(targetId).catch(() => null);
+        if (targetMember && (targetMember.status === 'creator' || targetMember.status === 'administrator' || ADMIN_IDS.includes(targetId))) {
+            return ctx.reply('🚫 Admin အချင်းချင်း Ban ၍ မရပါ။');
+        }
 
         await ctx.banChatMember(targetId);
-        await ctx.deleteMessage(ctx.message.reply_to_message.message_id).catch(() => {});
+        await ctx.deleteMessage(replyMsg.message_id).catch(() => {});
         await ctx.deleteMessage(ctx.message.message_id).catch(() => {});
         await ctx.reply(`✅ [ ${targetUser.first_name} ] ကို Group မှ အောင်မြင်စွာ ဖယ်ရှားလိုက်ပါပြီ။`);
     } catch (err) {
         console.log('Error in /ban:', err);
+        ctx.reply('🚫 Ban လုပ်၍မရပါ။ Bot တွင် Ban Users Permission ရှိမရှိ စစ်ဆေးပါ။');
     }
 });
 
@@ -79,30 +87,38 @@ bot.command('mute', async (ctx) => {
     if (!ctx.message.reply_to_message) return ctx.reply('💡 Mute လုပ်လိုသူ၏ မက်ဆေ့ခ်ျကို Reply ဆွဲပြီး /mute ဟု ရိုက်ထည့်ပါ။');
 
     const commanderId = ctx.from.id;
-    const targetUser = ctx.message.reply_to_message.from;
+    const replyMsg = ctx.message.reply_to_message;
+    if (replyMsg.sender_chat) return ctx.reply('🚫 Channel မက်ဆေ့ခ်ျကို Mute ၍မရပါ။');
+
+    const targetUser = replyMsg.from;
     const targetId = targetUser.id;
 
     try {
         const commanderMember = await ctx.getChatMember(commanderId);
-        if (commanderMember.status !== 'creator' && commanderMember.status !== 'administrator') return;
+        if (commanderMember.status !== 'creator' && commanderMember.status !== 'administrator' && !ADMIN_IDS.includes(commanderId)) {
+            return ctx.reply('🚫 သင်သည် Admin မဟုတ်ပါ။');
+        }
 
-        const targetMember = await ctx.getChatMember(targetId);
-        if (targetMember.status === 'creator' || targetMember.status === 'administrator') return ctx.reply('🚫 Admin အချင်းချင်း Mute ၍ မရပါ။');
+        const targetMember = await ctx.getChatMember(targetId).catch(() => null);
+        if (targetMember && (targetMember.status === 'creator' || targetMember.status === 'administrator' || ADMIN_IDS.includes(targetId))) {
+            return ctx.reply('🚫 Admin အချင်းချင်း Mute ၍ မရပါ။');
+        }
 
         const untilDate = Math.floor(Date.now() / 1000) + (24 * 60 * 60);
         await ctx.restrictChatMember(targetId, {
             permissions: { can_send_messages: false, can_send_media_messages: false, can_send_other_messages: false, can_add_web_page_previews: false },
             until_date: untilDate
         });
-        await ctx.deleteMessage(ctx.message.reply_to_message.message_id).catch(() => {});
+        await ctx.deleteMessage(replyMsg.message_id).catch(() => {});
         await ctx.deleteMessage(ctx.message.message_id).catch(() => {});
         await ctx.reply(`🤐 [ ${targetUser.first_name} ] ကို ၂၄ နာရီ စာပို့ခွင့် ပိတ်လိုက်ပါပြီ။`);
     } catch (err) {
         console.log('Error in /mute:', err);
+        ctx.reply('🚫 Mute လုပ်၍မရပါ။ Bot တွင် Restrict Users Permission ရှိမရှိ စစ်ဆေးပါ။');
     }
 });
 
-// --- ၄။ Message Monitoring (Link & Bad Words) ---
+// --- ၄။ Message Monitoring (Link, Bad Words & Admin Bypass) ---
 bot.on('text', async (ctx) => {
     if (ctx.chat.type === 'private') return;
 
@@ -112,13 +128,14 @@ bot.on('text', async (ctx) => {
     const messageText = ctx.message.text;
     const messageTextLower = messageText.toLowerCase();
 
-    // Skip check for Admins
+    // --- အရေးကြီးဆုံး: Admin များကို လုံးဝ (လုံးဝ) စစ်ဆေးမှုမှ ကင်းလွတ်ခွင့်ပေးခြင်း ---
+    if (ADMIN_IDS.includes(userId)) return;
     try {
         const chatMember = await ctx.telegram.getChatMember(chatId, userId);
         if (chatMember.status === 'creator' || chatMember.status === 'administrator') return;
     } catch (e) {}
 
-    // A. Bad Words Check (စကားလုံးအသစ်များ ထပ်တိုးထားပါသည်)
+    // A. Bad Words Check (စကားလုံးများ စစ်ဆေးခြင်း)
     const badWords = [
         'လီး', 'ငါလိုး', 'ငါလိုးမ', 'မအေလိုး', 'စောက်ရူး', 'နှမလိုး', 'bitch', 'fuck you', 'fuck',
         'မအေယိုး', 'မအေရိုး', 'ဖာခံ', 'ဖာသည်', 'ဖင်ခံ', 'ငါယိုးမ', 'ငါရိုးမ', 'နှမိုးလ',
@@ -130,9 +147,14 @@ bot.on('text', async (ctx) => {
     const linkRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.[a-zA-Z]{2,}\/[^\s]*)/;
     const hasLink = linkRegex.test(messageText);
 
+    // C. Bot Mention Check (@WebBinanceAppBot ကဲ့သို့ စာသားရိုက်ခြင်းကို စစ်ဆေးရန်)
+    const isBotMention = /@\w+bot\b/i.test(messageText) || messageTextLower.includes('@webbinanceappbot');
+
     let violationReason = '';
     if (containsBadWord) {
         violationReason = 'ရိုင်းစိုင်းသော စကားလုံးများ သုံးစွဲခြင်း';
+    } else if (isBotMention) {
+        violationReason = 'အခြား Bot အမည်များကို ခေါ်ယူအသုံးပြုခြင်း';
     } else if (hasLink) {
         const isTelegramLink = messageText.includes('t.me/') || messageText.includes('telegram.me/');
         if (isTelegramLink) {
@@ -185,7 +207,7 @@ bot.on('text', async (ctx) => {
     }
 });
 
-// Admin Decision Handling (မူလအတိုင်း)
+// Admin Decision Handling
 bot.on('callback_query', async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
     const adminId = ctx.from.id;
@@ -237,7 +259,6 @@ bot.on('new_chat_members', async (ctx) => {
                 console.log('Bot ကို ဖယ်ရှားရာတွင် Error တက်နေပါသည်:', err);
             }
         } else if (!member.is_bot) {
-            // လူအစစ်ဆိုလျှင် ပုံမှန်အတိုင်း နှုတ်ဆက်မည်
             ctx.reply(`မင်္ဂလာပါ ${member.first_name}၊ Group ထဲကို ကြိုဆိုပါတယ်။ စည်းကမ်းများကို လိုက်နာပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။`);
         }
     }
