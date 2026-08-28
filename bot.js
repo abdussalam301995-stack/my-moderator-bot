@@ -177,10 +177,8 @@ bot.on('text', async (ctx) => {
         'dick', 'pussy', 'sex', 'ass', 'အီး', 'ချီး', 'သေး', 'လိင်တံ', 'လရည်'
     ];
 
-    // စာကြောင်းထဲက စာလုံးများကို Space များဖြင့် ပိုင်းဖြတ်၍ သတ်မှတ်စာလုံးနှင့် အတိအကျ တူမတူ စစ်ဆေးခြင်း
     const wordsInMessage = messageTextLower.split(/\s+/);
     const containsBadWord = badWords.some(badWord => {
-        // Multi-word ဖြစ်လျှင် (ဥပမာ - fuck you) တစ်ကြောင်းလုံးပါမပါ စစ်မယ်၊ Single word ဖြစ်လျှင် အတိအကျတူမတူ စစ်မယ်
         if (badWord.includes(' ')) {
             return messageTextLower.includes(badWord);
         }
@@ -195,6 +193,8 @@ bot.on('text', async (ctx) => {
     const isBotMention = /@\w+bot\b/i.test(messageText) || messageTextLower.includes('@webbinanceappbot');
 
     let violationReason = '';
+    let silentDelete = false; // တိတ်တဆိတ် ဖျက်ရန် (Warning မပေးပါ)
+
     if (containsBadWord) {
         violationReason = 'ရိုင်းစိုင်းသော စကားလုံးများ သုံးစွဲခြင်း';
     } else if (isBotMention) {
@@ -203,16 +203,30 @@ bot.on('text', async (ctx) => {
         const isTelegramLink = messageText.includes('t.me/') || messageText.includes('telegram.me/');
         if (isTelegramLink) {
             const currentTime = Date.now();
-            const linkKey = `${chatId}_${messageText}`;
-            if (linkShareHistory.has(linkKey)) {
-                const lastShareData = linkShareHistory.get(linkKey);
-                if (currentTime - lastShareData.time < 3600000) {
-                    violationReason = 'Telegram Link ကို တစ်နာရီအတွင်း ထပ်ခါထပ်ခါ တင်ခြင်း';
+
+            // ၁။ Bot Link အမည်ကို ထုတ်ယူခြင်း (ဥပမာ - dogetapxbot)
+            const botMatch = messageText.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]+)/i);
+            const botName = botMatch ? botMatch[1].toLowerCase() : '';
+
+            // ၂။ Invite Code / Start Parameter ကို ထုတ်ယူခြင်း
+            const paramMatch = messageText.match(/(?:\?start=|\/)([a-zA-Z0-9_-]+)/i);
+            const inviteCode = paramMatch ? paramMatch[1] : '';
+
+            // Bot Link ရော Code ရော ရှိမှသာ တူညီမှု ရှိမရှိ စစ်ဆေးမည်
+            if (botName && inviteCode) {
+                const linkKey = `${chatId}_${userId}_${botName}_${inviteCode}`;
+
+                if (linkShareHistory.has(linkKey)) {
+                    const lastShareData = linkShareHistory.get(linkKey);
+                    if (currentTime - lastShareData.time < 3600000) { // ၁ နာရီအတွင်း
+                        violationReason = 'တူညီသော Bot Link နှင့် Code ကို တစ်နာရီအတွင်း ထပ်မံတင်ခြင်း';
+                        silentDelete = true; // သတိပေးချက်မပေးဘဲ ချက်ချင်း တိတ်တဆိတ် ဖျက်မည်
+                    } else {
+                        linkShareHistory.set(linkKey, { time: currentTime });
+                    }
                 } else {
-                    linkShareHistory.set(linkKey, { userId, time: currentTime });
+                    linkShareHistory.set(linkKey, { time: currentTime });
                 }
-            } else {
-                linkShareHistory.set(linkKey, { userId, time: currentTime });
             }
         } else {
             violationReason = 'ခွင့်မပြုထားသော Link များ တင်ခြင်း';
@@ -221,6 +235,11 @@ bot.on('text', async (ctx) => {
 
     if (violationReason) {
         try { await ctx.deleteMessage(); } catch (err) { return; }
+
+        // အကယ်၍ တူညီသော Bot Link နှင့် Code ဖြစ်၍ silentDelete ဖြစ်နေလျှင် ဤနေရာတွင် ရပ်မည် (Warning လုံးဝမပေးပါ)
+        if (silentDelete) {
+            return;
+        }
 
         let warnings = (userWarnings.get(userId) || 0) + 1;
         userWarnings.set(userId, warnings);
