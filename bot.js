@@ -152,6 +152,73 @@ bot.command('unmute', async (ctx) => {
         ctx.reply('🚫 Unmute လုပ်ရာတွင် အမှားအယွင်းရှိပါသည်။');
     }
 });
+// --- /price Commands (ATF, GRAM, MGRMGA, SLPY ဈေးနှုန်းများကြည့်ရန် - Admin Only) ---
+const tokenConfigs = {
+    'priceatf': { name: 'ATF', address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb' },
+    'pricegram': { name: 'GRAM', address: 'EQC47093oX5XhbLqYA7V_1LpI_2E-rB10s-v-7fXm_u8B7-x' },
+    'pricemgrmga': { name: 'MGRMGA', address: 'EQDnthM6DjZLIlQ_lQlCwtj-Ez2UrYzpWUV493bcccz-Rj0c' },
+    'priceslpy': { name: 'SLPY', address: 'EQA-mXHQ6mjXr8avmEwSszgeCxAez3uMAwFX1XI1Z4z9VDVp' }
+};
+
+Object.keys(tokenConfigs).forEach(cmd => {
+    bot.command(cmd, async (ctx) => {
+        const userId = ctx.from.id;
+        
+        // Admin ဟုတ်မဟုတ် စစ်ဆေးခြင်း
+        let isAdmin = ADMIN_IDS.includes(userId);
+        if (!isAdmin && ctx.chat.type !== 'private') {
+            try {
+                const member = await ctx.getChatMember(userId);
+                if (member.status === 'creator' || member.status === 'administrator') {
+                    isAdmin = true;
+                }
+            } catch (e) {
+                console.log('Error checking admin status:', e);
+            }
+        }
+
+        if (!isAdmin) {
+            return ctx.reply('🚫 ဤ Command ကို Admin များသာ အသုံးပြုခွင့် ရှိပါသည်။');
+        }
+
+        const tokenInfo = tokenConfigs[cmd];
+        const waitingMsg = await ctx.reply(`⏳ ${tokenInfo.name} Token ၏ Live Update ဈေးနှုန်းကို ဆွဲယူနေပါသည်...`);
+
+        try {
+            // DexScreener API မှ Live Update ဆွဲယူခြင်း
+            const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenInfo.address}`);
+            const data = await response.json();
+
+            if (data.pairs && data.pairs.length > 0) {
+                // DeDust သို့မဟုတ် STON.fi မှ အကောင်းဆုံး Pair ကို ရွေးချယ်ခြင်း
+                const pair = data.pairs.find(p => p.dexId === 'dedust' || p.dexId === 'ston-fi') || data.pairs[0];
+                
+                const priceUsd = Number(pair.priceUsd).toPrecision(4);
+                const priceTon = Number(pair.priceNative).toPrecision(4);
+                const priceChange24h = pair.priceChange.h24;
+                const changeEmoji = priceChange24h >= 0 ? '📈' : '📉';
+
+                const priceMessage = `💎 **${tokenInfo.name} Token Price (Live Update)**\n\n` +
+                                     `💵 ဈေးနှုန်း (USD): **$${priceUsd}**\n` +
+                                     `💠 ဈေးနှုန်း (TON): **${priceTon} TON**\n` +
+                                     `${changeEmoji} 24h ပြောင်းလဲမှု: **${priceChange24h}%**\n\n` +
+                                     `🔗 [DEX တွင် သွားကြည့်ရန်](${pair.url})`;
+
+                await ctx.telegram.editMessageText(ctx.chat.id, waitingMsg.message_id, null, priceMessage, { 
+                    parse_mode: 'Markdown', 
+                    disable_web_page_preview: true 
+                });
+            } else {
+                await ctx.telegram.editMessageText(ctx.chat.id, waitingMsg.message_id, null, `❌ ဈေးကွက်ထဲတွင် ${tokenInfo.name} အတွက် ဈေးနှုန်း အချက်အလက် ရှာမတွေ့ပါ။`);
+            }
+        } catch (err) {
+            console.log(`Error fetching ${tokenInfo.name} price:`, err);
+            await ctx.telegram.editMessageText(ctx.chat.id, waitingMsg.message_id, null, '🚫 ဈေးနှုန်းဆွဲယူရာတွင် အင်တာနက်ချိတ်ဆက်မှု အမှားအယွင်းဖြစ်ပေါ်နေပါသည်။');
+        }
+    });
+});
+
+
 
 // --- ၅။ Message Monitoring (Link, Bad Words & Admin Bypass) ---
 bot.on('text', async (ctx) => {
