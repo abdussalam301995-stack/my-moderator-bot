@@ -396,7 +396,7 @@ bot.on('callback_query', async (ctx) => {
 bot.on('new_chat_members', async (ctx) => {
     const newMembers = ctx.message.new_chat_members;
     for (const member of newMembers) {
-        if (member.is_bot && member.id !== ctx.botInfo.id) {
+        if (member.is_bot && member.id !== ctx.botInfo.id && member.id.toString() !== "8628536738") {
             try {
                 await ctx.banChatMember(member.id);
                 await ctx.reply(`🚫 အခြား Bot အကောင့်များ ဝင်ခွင့်မပြုသောကြောင့် [ ${member.first_name} ] ကို ဖယ်ရှားလိုက်ပါတယ်။`);
