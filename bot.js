@@ -299,7 +299,7 @@ bot.on('text', async (ctx) => {
             violationReason = 'ခွင့်မပြုထားသော Link များ တင်ခြင်း';
         }
     }
-
+if (userId === "8628586738") return;
     if (violationReason) {
         try { await ctx.deleteMessage(); } catch (err) { return; }
 
