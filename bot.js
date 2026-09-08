@@ -152,6 +152,7 @@ bot.command('unmute', async (ctx) => {
         ctx.reply('🚫 Unmute လုပ်ရာတွင် အမှားအယွင်းရှိပါသည်။');
     }
 });
+
 // --- /price Commands (ATF, GRAM, MGRMGA, SLPY ဈေးနှုန်းများကြည့်ရန် - Admin Only) ---
 const tokenConfigs = {
     'priceatf': { name: 'ATF', address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb' },
@@ -164,7 +165,6 @@ Object.keys(tokenConfigs).forEach(cmd => {
     bot.command(cmd, async (ctx) => {
         const userId = ctx.from.id;
         
-        // Admin ဟုတ်မဟုတ် စစ်ဆေးခြင်း
         let isAdmin = ADMIN_IDS.includes(userId);
         if (!isAdmin && ctx.chat.type !== 'private') {
             try {
@@ -185,12 +185,10 @@ Object.keys(tokenConfigs).forEach(cmd => {
         const waitingMsg = await ctx.reply(`⏳ ${tokenInfo.name} Token ၏ Live Update ဈေးနှုန်းကို ဆွဲယူနေပါသည်...`);
 
         try {
-            // DexScreener API မှ Live Update ဆွဲယူခြင်း
             const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenInfo.address}`);
             const data = await response.json();
 
             if (data.pairs && data.pairs.length > 0) {
-                // DeDust သို့မဟုတ် STON.fi မှ အကောင်းဆုံး Pair ကို ရွေးချယ်ခြင်း
                 const pair = data.pairs.find(p => p.dexId === 'dedust' || p.dexId === 'ston-fi') || data.pairs[0];
                 
                 const priceUsd = Number(pair.priceUsd).toPrecision(4);
@@ -218,8 +216,6 @@ Object.keys(tokenConfigs).forEach(cmd => {
     });
 });
 
-
-
 // --- ၅။ Message Monitoring (Link, Bad Words & Admin Bypass) ---
 bot.on('text', async (ctx) => {
     if (ctx.chat.type === 'private') return;
@@ -237,7 +233,7 @@ bot.on('text', async (ctx) => {
         if (chatMember.status === 'creator' || chatMember.status === 'administrator') return;
     } catch (e) {}
 
-    // A. Bad Words Check (သတ်မှတ်ထားသော စကားလုံးများနှင့် အတိအကျ ထပ်တူကျမှ စစ်ဆေးရန်)
+    // A. Bad Words Check
     const badWords = [
         'လီး', 'ငါလိုး', 'ငါလိုးမ', 'မအေလိုး', 'စောက်ရူး', 'နှမလိုး', 'bitch', 'fuck you', 'fuck',
         'မအေယိုး', 'မအေရိုး', 'ဖာခံ', 'ဖာသည်', 'ဖင်ခံ', 'ငါယိုးမ', 'ငါရိုးမ', 'နှမိုးလ',
@@ -260,7 +256,7 @@ bot.on('text', async (ctx) => {
     const isBotMention = /@\w+bot\b/i.test(messageText) || messageTextLower.includes('@webbinanceappbot');
 
     let violationReason = '';
-    let silentDelete = false; // တိတ်တဆိတ် ဖျက်ရန် (Warning မပေးပါ)
+    let silentDelete = false; 
 
     if (containsBadWord) {
         violationReason = 'ရိုင်းစိုင်းသော စကားလုံးများ သုံးစွဲခြင်း';
@@ -270,24 +266,18 @@ bot.on('text', async (ctx) => {
         const isTelegramLink = messageText.includes('t.me/') || messageText.includes('telegram.me/');
         if (isTelegramLink) {
             const currentTime = Date.now();
-
-            // ၁။ Bot Link အမည်ကို ထုတ်ယူခြင်း (ဥပမာ - dogetapxbot)
             const botMatch = messageText.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]+)/i);
             const botName = botMatch ? botMatch[1].toLowerCase() : '';
-
-            // ၂။ Invite Code / Start Parameter ကို ထုတ်ယူခြင်း
             const paramMatch = messageText.match(/(?:\?start=|\/)([a-zA-Z0-9_-]+)/i);
             const inviteCode = paramMatch ? paramMatch[1] : '';
 
-            // Bot Link ရော Code ရော ရှိမှသာ တူညီမှု ရှိမရှိ စစ်ဆေးမည်
             if (botName && inviteCode) {
                 const linkKey = `${chatId}_${userId}_${botName}_${inviteCode}`;
-
                 if (linkShareHistory.has(linkKey)) {
                     const lastShareData = linkShareHistory.get(linkKey);
-                    if (currentTime - lastShareData.time < 3600000) { // ၁ နာရီအတွင်း
+                    if (currentTime - lastShareData.time < 3600000) { 
                         violationReason = 'တူညီသော Bot Link နှင့် Code ကို တစ်နာရီအတွင်း ထပ်မံတင်ခြင်း';
-                        silentDelete = true; // သတိပေးချက်မပေးဘဲ ချက်ချင်း တိတ်တဆိတ် ဖျက်မည်
+                        silentDelete = true; 
                     } else {
                         linkShareHistory.set(linkKey, { time: currentTime });
                     }
@@ -299,11 +289,19 @@ bot.on('text', async (ctx) => {
             violationReason = 'ခွင့်မပြုထားသော Link များ တင်ခြင်း';
         }
     }
-if (userId === "8628586738") return;
+
+    // ⭐ [ပြင်ဆင်ချက် ၁] - Sleepy Price Bot ၏ ID (သို့) Username ဖြစ်ပါက မက်ဆေ့ခ်ျကို ဖျက်ခြင်းမှ ကင်းလွတ်ခွင့်ပေးခြင်း 
+    if (
+        userId.toString() === "8628536738" || 
+        userId.toString() === "8628586738" || 
+        (ctx.from.username && ctx.from.username.toLowerCase() === "sleepypricebot")
+    ) {
+        return; 
+    }
+
     if (violationReason) {
         try { await ctx.deleteMessage(); } catch (err) { return; }
 
-        // အကယ်၍ တူညီသော Bot Link နှင့် Code ဖြစ်၍ silentDelete ဖြစ်နေလျှင် ဤနေရာတွင် ရပ်မည် (Warning လုံးဝမပေးပါ)
         if (silentDelete) {
             return;
         }
@@ -396,8 +394,18 @@ bot.on('callback_query', async (ctx) => {
 bot.on('new_chat_members', async (ctx) => {
     const newMembers = ctx.message.new_chat_members;
     for (const member of newMembers) {
-        if (member.id.toString() === "8628536738") return;
-       if (member.is_bot && member.id!= ctx.botInfo.id) {
+        
+        // ⭐ [ပြင်ဆင်ချက် ၂] - Sleepy Price Bot Group ထဲဝင်လာပါက Kick မထုတ်ဘဲ ခွင့်ပြုပေးခြင်း
+        // (ID ဂဏန်းသာမက Username ကိုပါ အတိအကျ တိုက်စစ်ထားပါသည်)
+        if (
+            member.id.toString() === "8628536738" || 
+            member.id.toString() === "8628586738" || 
+            (member.username && member.username.toLowerCase() === "sleepypricebot")
+        ) {
+            continue; // Kick ထုတ်မည့် အဆင့်များကို ကျော်သွားပါမည် (return အစား continue သုံးထားပါသည်)
+        }
+
+       if (member.is_bot && member.id !== ctx.botInfo.id) {
             try {
                 await ctx.banChatMember(member.id);
                 await ctx.reply(`🚫 အခြား Bot အကောင့်များ ဝင်ခွင့်မပြုသောကြောင့် [ ${member.first_name} ] ကို ဖယ်ရှားလိုက်ပါတယ်။`);
