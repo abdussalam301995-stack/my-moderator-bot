@@ -155,10 +155,10 @@ bot.command('unmute', async (ctx) => {
 
 // --- /price Commands (ATF, GRAM, MGRMGA, SLPY ဈေးနှုန်းများကြည့်ရန် - Admin Only) ---
 const tokenConfigs = {
-    'priceatf': { name: 'ATF', address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb' },
-    'pricegram': { name: 'GRAM', address: 'EQC47093oX5XhbLqYA7V_1LpI_2E-rB10s-v-7fXm_u8B7-x' },
-    'pricemgrmga': { name: 'MGRMGA', address: 'EQDnthM6DjZLIlQ_lQlCwtj-Ez2UrYzpWUV493bcccz-Rj0c' },
-    'priceslpy': { name: 'SLPY', address: 'EQA-mXHQ6mjXr8avmEwSszgeCxAez3uMAwFX1XI1Z4z9VDVp' }
+    'atf': { name: 'ATF', address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb' },
+    'gram': { name: 'GRAM', address: 'EQC47093oX5XhbLqYA7V_1LpI_2E-rB10s-v-7fXm_u8B7-x' },
+    'MRG': { name: 'MRG', address: 'EQDj-zlSvj4Au154XjsU7ATzt13p8JjYEs0weVv1rVbCJSn0' },
+    'slpy': { name: 'SLPY', address: 'EQA-mXHQ6mjXr8avmEwSszgeCxAez3uMAwFX1XI1Z4z9VDVp' }
 };
 
 Object.keys(tokenConfigs).forEach(cmd => {
