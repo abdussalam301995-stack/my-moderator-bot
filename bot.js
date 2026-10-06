@@ -628,143 +628,192 @@ bot.command('unmute', async (ctx) => {
 
 
 
-// --- /price Commands (ATF, GRAM, MRG, SLPY, VIC ဈေးနှုန်းများကြည့်ရန် - Admin Only) ---
+// --- /price Commands (ATF, GRAM, MRG, SLPY, VIC, MAI ဈေးနှုန်းများကြည့်ရန် - Admin Only) ---
 
 const tokenConfigs = {
     atf:  { name: 'ATF',  address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb' },
     gram: { name: 'GRAM', address: 'EQC47093oX5XhbLqYA7V_1LpI_2E-rB10s-v-7fXm_u8B7-x' },
     mrg:  { name: 'MRG',  address: 'EQDj-zlSvj4Au154XjsU7ATzt13p8JjYEs0weVv1rVbCJSn0' },
     slpy: { name: 'SLPY', address: 'EQA-mXHQ6mjXr8avmEwSszgeCxAez3uMAwFX1XI1Z4z9VDVp' },
-    vic:  { name: 'VIC',  address: 'EQClb4h8Wnqx-X_sKMFExqxcQusCktlMHxYZ2M80A_WnnFUe' }
+    vic:  { name: 'VIC',  address: 'EQClb4h8Wnqx-X_sKMFExqxcQusCktlMHxYZ2M80A_WnnFUe' },
+    mai:  { name: 'MAI',  address: 'EQD5pWilwl9ypQ1JFxoDktsQl_LAALALnqHjZoxhx_2nET-r' }
 };
 
-// DexScreener protection: cache successful prices, deduplicate simultaneous calls,
-// and stop hammering the API when it returns HTTP 429.
 const PRICE_API_TIMEOUT_MS = 10000;
-const PRICE_CACHE_TTL_MS = 60 * 1000;       // 1 minute
-const PRICE_STALE_TTL_MS = 15 * 60 * 1000; // stale fallback for temporary API failures
-const PRICE_429_COOLDOWN_MS = 60 * 1000;    // global cooldown after rate-limit
-
+const PRICE_CACHE_TTL_MS = 30 * 1000;
+const PRICE_STALE_TTL_MS = 30 * 60 * 1000;
 const priceCache = new Map();
 const priceInFlight = new Map();
-let dexScreenerBlockedUntil = 0;
 
-function makeHttpError(response) {
-    const err = new Error(`DexScreener HTTP ${response.status} ${response.statusText}`);
+function httpError(provider, response) {
+    const err = new Error(`${provider} HTTP ${response.status} ${response.statusText}`);
     err.status = response.status;
-    const retryAfter = Number(response.headers.get('retry-after'));
-    if (Number.isFinite(retryAfter) && retryAfter > 0) {
-        err.retryAfterMs = retryAfter * 1000;
-    }
+    err.provider = provider;
     return err;
 }
 
-async function fetchDexScreenerToken(address, tokenName) {
-    const now = Date.now();
-    const cached = priceCache.get(address);
-
-    if (cached && now - cached.savedAt < PRICE_CACHE_TTL_MS) {
-        return { data: cached.data, cached: true, stale: false };
-    }
-
-    // If DexScreener recently rate-limited this Render instance, don't make more
-    // requests during the cooldown. Use the last good value when available.
-    if (now < dexScreenerBlockedUntil) {
-        if (cached && now - cached.savedAt < PRICE_STALE_TTL_MS) {
-            return { data: cached.data, cached: true, stale: true };
-        }
-        const err = new Error('DexScreener rate-limit cooldown is active');
-        err.status = 429;
-        err.retryAfterMs = dexScreenerBlockedUntil - now;
-        throw err;
-    }
-
-    // One network request per token at a time, even if several commands arrive together.
-    if (priceInFlight.has(address)) {
-        return priceInFlight.get(address);
-    }
-
-    const requestPromise = (async () => {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), PRICE_API_TIMEOUT_MS);
-
-        try {
-            const response = await fetch(
-                `https://api.dexscreener.com/latest/dex/tokens/${address}`,
-                {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' },
-                    signal: controller.signal
-                }
-            );
-
-            if (!response.ok) {
-                const err = makeHttpError(response);
-
-                // IMPORTANT: never immediately retry HTTP 429. Retrying 3 times was
-                // multiplying the rate-limit problem in the old code.
-                if (response.status === 429) {
-                    dexScreenerBlockedUntil = Date.now() + Math.max(
-                        err.retryAfterMs || 0,
-                        PRICE_429_COOLDOWN_MS
-                    );
-                }
-                throw err;
-            }
-
-            const data = await response.json();
-            if (!data || typeof data !== 'object') {
-                throw new Error('DexScreener returned an invalid JSON response');
-            }
-
-            priceCache.set(address, { data, savedAt: Date.now() });
-            return { data, cached: false, stale: false };
-        } catch (err) {
-            const reason = err.name === 'AbortError'
-                ? `timeout after ${PRICE_API_TIMEOUT_MS}ms`
-                : err.message;
-            console.error(`[Price API] ${tokenName} failed: ${reason}`);
-
-            // A recent successful value is safer than repeatedly hitting an API that
-            // is temporarily unavailable/rate-limited.
-            const fallback = priceCache.get(address);
-            if (fallback && Date.now() - fallback.savedAt < PRICE_STALE_TTL_MS) {
-                return { data: fallback.data, cached: true, stale: true };
-            }
-            throw err;
-        } finally {
-            clearTimeout(timeoutId);
-        }
-    })();
-
-    priceInFlight.set(address, requestPromise);
+async function fetchJson(url, provider) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PRICE_API_TIMEOUT_MS);
     try {
-        return await requestPromise;
+        const response = await fetch(url, {
+            headers: { 'Accept': 'application/json' },
+            signal: controller.signal
+        });
+        if (!response.ok) throw httpError(provider, response);
+        return await response.json();
     } finally {
-        priceInFlight.delete(address);
+        clearTimeout(timeoutId);
     }
 }
 
 function selectPreferredPair(pairs) {
     if (!Array.isArray(pairs) || pairs.length === 0) return null;
+    const tonPairs = pairs.filter(p => p && p.chainId === 'ton');
+    const preferred = tonPairs.filter(p => p.dexId === 'dedust' || p.dexId === 'ston-fi');
+    const candidates = preferred.length ? preferred : (tonPairs.length ? tonPairs : pairs);
+    return [...candidates].sort((a, b) =>
+        (Number(b?.liquidity?.usd) || 0) - (Number(a?.liquidity?.usd) || 0)
+    )[0] || null;
+}
 
-    const preferred = pairs.filter(pair =>
-        pair &&
-        pair.chainId === 'ton' &&
-        (pair.dexId === 'dedust' || pair.dexId === 'ston-fi')
+async function fetchFromDexScreener(address) {
+    const data = await fetchJson(
+        `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(address)}`,
+        'DexScreener'
     );
+    const pair = selectPreferredPair(data?.pairs);
+    if (!pair) throw new Error('DexScreener: no TON pool found');
+    return {
+        priceUsd: pair.priceUsd,
+        priceTon: pair.priceNative,
+        change24h: pair?.priceChange?.h24,
+        url: typeof pair.url === 'string' ? pair.url : null,
+        source: 'DexScreener'
+    };
+}
 
-    const candidates = preferred.length > 0
-        ? preferred
-        : pairs.filter(pair => pair && pair.chainId === 'ton');
+async function fetchFromGeckoTerminal(address) {
+    // GeckoTerminal is CoinGecko's on-chain DEX data source and accepts contract addresses.
+    const data = await fetchJson(
+        `https://api.geckoterminal.com/api/v2/networks/ton/tokens/${encodeURIComponent(address)}`,
+        'GeckoTerminal/CoinGecko'
+    );
+    const a = data?.data?.attributes;
+    if (!a || a.price_usd == null) throw new Error('GeckoTerminal: token price not found');
 
-    const finalCandidates = candidates.length > 0 ? candidates : pairs;
+    // The token endpoint guarantees USD price. Native TON price may not be present,
+    // so keep it optional rather than displaying a fabricated conversion.
+    return {
+        priceUsd: a.price_usd,
+        priceTon: a.price_in_native_currency ?? null,
+        change24h: a?.price_change_percentage?.h24 ?? null,
+        url: `https://www.geckoterminal.com/ton/tokens/${encodeURIComponent(address)}`,
+        source: 'GeckoTerminal (CoinGecko)'
+    };
+}
 
-    return [...finalCandidates].sort((a, b) => {
-        const liquidityA = Number(a?.liquidity?.usd) || 0;
-        const liquidityB = Number(b?.liquidity?.usd) || 0;
-        return liquidityB - liquidityA;
-    })[0] || null;
+function findDeDustPriceNode(data, address, tokenName) {
+    const wantedAddress = String(address).toLowerCase();
+    const wantedSymbol = String(tokenName).toLowerCase();
+    const seen = new Set();
+    const stack = [data];
+    let symbolFallback = null;
+
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object' || seen.has(node)) continue;
+        seen.add(node);
+
+        const strings = Object.values(node)
+            .filter(v => typeof v === 'string')
+            .map(v => v.toLowerCase());
+        const hasAddress = strings.some(v => v === wantedAddress || v.includes(wantedAddress));
+        const hasSymbol = strings.some(v => v === wantedSymbol);
+
+        const priceUsd = node.priceUsd ?? node.price_usd ?? node.usdPrice ?? node.usd_price ??
+            node.priceUSD ?? node.price?.usd ?? node.price?.USD ?? null;
+        const priceTon = node.priceTon ?? node.price_ton ?? node.tonPrice ?? node.ton_price ??
+            node.priceNative ?? node.price_native ?? node.price?.ton ?? node.price?.TON ?? null;
+        const change24h = node.change24h ?? node.change_24h ?? node.priceChange24h ??
+            node.price_change_24h ?? node.price_change_percentage_24h ?? null;
+
+        if (hasAddress && (priceUsd != null || priceTon != null)) {
+            return { priceUsd, priceTon, change24h };
+        }
+        if (!symbolFallback && hasSymbol && (priceUsd != null || priceTon != null)) {
+            symbolFallback = { priceUsd, priceTon, change24h };
+        }
+        for (const value of Object.values(node)) {
+            if (value && typeof value === 'object') stack.push(value);
+        }
+    }
+    return symbolFallback;
+}
+
+async function fetchFromDeDust(address, tokenName) {
+    // DeDust exposes public v2 market endpoints. Try prices first, then assets,
+    // and only accept an entry that matches this jetton address (symbol is a fallback).
+    const endpoints = [
+        'https://api.dedust.io/v2/prices',
+        'https://api.dedust.io/v2/assets'
+    ];
+    const errors = [];
+
+    for (const url of endpoints) {
+        try {
+            const data = await fetchJson(url, 'DeDust');
+            const found = findDeDustPriceNode(data, address, tokenName);
+            if (found && found.priceUsd != null) {
+                return {
+                    priceUsd: found.priceUsd,
+                    priceTon: found.priceTon ?? null,
+                    change24h: found.change24h ?? null,
+                    url: `https://dedust.io/swap/TON/${encodeURIComponent(address)}`,
+                    source: 'DeDust'
+                };
+            }
+        } catch (err) {
+            errors.push(err.message);
+        }
+    }
+    throw new Error(`DeDust: token price not found${errors.length ? ` (${errors.join(' | ')})` : ''}`);
+}
+
+async function fetchTokenPrice(address, tokenName) {
+    const now = Date.now();
+    const cached = priceCache.get(address);
+    if (cached && now - cached.savedAt < PRICE_CACHE_TTL_MS) {
+        return { ...cached.value, cached: true, stale: false };
+    }
+    if (priceInFlight.has(address)) return priceInFlight.get(address);
+
+    const promise = (async () => {
+        const errors = [];
+        // Primary: DexScreener. If it is rate-limited/unavailable, immediately use
+        // GeckoTerminal/CoinGecko instead of telling the Telegram user to wait.
+        for (const provider of [fetchFromDexScreener, fetchFromGeckoTerminal, (address) => fetchFromDeDust(address, tokenName)]) {
+            try {
+                const value = await provider(address);
+                priceCache.set(address, { value, savedAt: Date.now() });
+                return { ...value, cached: false, stale: false };
+            } catch (err) {
+                errors.push(`${err.provider || provider.name}: ${err.message}`);
+                console.error(`[Price API] ${tokenName}: ${err.message}`);
+            }
+        }
+
+        if (cached && now - cached.savedAt < PRICE_STALE_TTL_MS) {
+            return { ...cached.value, cached: true, stale: true };
+        }
+        const err = new Error(`All price sources failed: ${errors.join(' | ')}`);
+        err.allSourcesFailed = true;
+        throw err;
+    })();
+
+    priceInFlight.set(address, promise);
+    try { return await promise; }
+    finally { priceInFlight.delete(address); }
 }
 
 function formatPrice(value) {
@@ -772,9 +821,7 @@ function formatPrice(value) {
     if (!Number.isFinite(number)) return 'N/A';
     if (number === 0) return '0';
     if (Math.abs(number) < 0.000001) return number.toPrecision(4);
-    if (Math.abs(number) < 1) {
-        return number.toFixed(10).replace(/0+$/, '').replace(/\.$/, '');
-    }
+    if (Math.abs(number) < 1) return number.toFixed(10).replace(/0+$/, '').replace(/\.$/, '');
     return number.toLocaleString('en-US', { maximumFractionDigits: 8 });
 }
 
@@ -782,101 +829,47 @@ Object.keys(tokenConfigs).forEach(cmd => {
     bot.command(cmd, async (ctx) => {
         const userId = ctx.from.id;
         let isAdmin = ADMIN_IDS.includes(userId);
-
         if (!isAdmin && ctx.chat.type !== 'private') {
             try {
                 const member = await ctx.getChatMember(userId);
-                if (member.status === 'creator' || member.status === 'administrator') {
-                    isAdmin = true;
-                }
-            } catch (e) {
-                console.log('Error checking admin status:', e);
-            }
+                if (member.status === 'creator' || member.status === 'administrator') isAdmin = true;
+            } catch (e) { console.log('Error checking admin status:', e); }
         }
-
-        if (!isAdmin) {
-            return ctx.reply('🚫 ဤ Command ကို Admin များသာ အသုံးပြုခွင့် ရှိပါသည်။');
-        }
+        if (!isAdmin) return ctx.reply('🚫 ဤ Command ကို Admin များသာ အသုံးပြုခွင့် ရှိပါသည်။');
 
         const tokenInfo = tokenConfigs[cmd];
-        const waitingMsg = await ctx.reply(
-            `⏳ ${tokenInfo.name} Token ၏ Live Update ဈေးနှုန်းကို ဆွဲယူနေပါသည်...`
-        );
+        const waitingMsg = await ctx.reply(`⏳ ${tokenInfo.name} Token ၏ Live Update ဈေးနှုန်းကို ဆွဲယူနေပါသည်...`);
 
         try {
-            const result = await fetchDexScreenerToken(tokenInfo.address, tokenInfo.name);
-            const pair = selectPreferredPair(result.data.pairs);
-
-            if (!pair) {
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id,
-                    waitingMsg.message_id,
-                    null,
-                    `❌ ဈေးကွက်ထဲတွင် ${tokenInfo.name} အတွက် ဈေးနှုန်း အချက်အလက် ရှာမတွေ့ပါ။`
-                );
-                return;
-            }
-
-            const priceUsd = formatPrice(pair.priceUsd);
-            const priceTon = formatPrice(pair.priceNative);
-            const rawChange24h = Number(pair?.priceChange?.h24);
+            const result = await fetchTokenPrice(tokenInfo.address, tokenInfo.name);
+            const priceUsd = formatPrice(result.priceUsd);
+            const priceTon = result.priceTon == null ? null : formatPrice(result.priceTon);
+            const rawChange24h = Number(result.change24h);
             const hasChange24h = Number.isFinite(rawChange24h);
-            const priceChange24h = hasChange24h ? rawChange24h : null;
-            const changeEmoji = !hasChange24h ? '➖' : (priceChange24h >= 0 ? '📈' : '📉');
-            const changeText = hasChange24h ? `${priceChange24h}%` : 'N/A';
-            const dexUrl = typeof pair.url === 'string' && pair.url.startsWith('http')
-                ? pair.url
-                : null;
+            const changeEmoji = !hasChange24h ? '➖' : (rawChange24h >= 0 ? '📈' : '📉');
+            const changeText = hasChange24h ? `${rawChange24h}%` : 'N/A';
             const cacheNote = result.stale
-                ? '\n\n⚠️ API ခေတ္တကန့်သတ်ထားသဖြင့် နောက်ဆုံးရရှိထားသော ဈေးနှုန်းကို ပြထားပါသည်။'
-                : (result.cached ? '\n\nℹ️ ၁ မိနစ်အတွင်း နောက်ဆုံးရရှိထားသော ဈေးနှုန်းဖြစ်ပါသည်။' : '');
+                ? '\n\n⚠️ Live API များခေတ္တမရသဖြင့် နောက်ဆုံးရရှိထားသော ဈေးနှုန်းကို ပြထားပါသည်။'
+                : (result.cached ? '\n\nℹ️ 30 စက္ကန့်အတွင်း နောက်ဆုံးရရှိထားသော ဈေးနှုန်းဖြစ်ပါသည်။' : '');
 
             const priceMessage =
                 `💎 **${tokenInfo.name} Token Price (Live Update)**\n\n` +
                 `💵 ဈေးနှုန်း (USD): **$${priceUsd}**\n` +
-                `💠 ဈေးနှုန်း (TON): **${priceTon} TON**\n` +
-                `${changeEmoji} 24h ပြောင်းလဲမှု: **${changeText}**` +
-                (dexUrl ? `\n\n🔗 [DEX တွင် သွားကြည့်ရန်](${dexUrl})` : '') +
+                (priceTon ? `💠 ဈေးနှုန်း (TON): **${priceTon} TON**\n` : '') +
+                `${changeEmoji} 24h ပြောင်းလဲမှု: **${changeText}**\n` +
+                `📡 Source: **${result.source}**` +
+                (result.url ? `\n\n🔗 [DEX တွင် သွားကြည့်ရန်](${result.url})` : '') +
                 cacheNote;
 
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                waitingMsg.message_id,
-                null,
-                priceMessage,
-                { parse_mode: 'Markdown', disable_web_page_preview: true }
-            );
-        } catch (err) {
-            const status = err?.status;
-            const isTimeout = err?.name === 'AbortError';
-            console.error(
-                `Error fetching ${tokenInfo.name} price:`,
-                status ? `HTTP ${status}` : err
-            );
-
-            let userMessage =
-                '🚫 ဈေးနှုန်း API ကို ခေတ္တဆက်သွယ်၍ မရသေးပါ။ အနည်းငယ်ကြာပြီး ပြန်စမ်းကြည့်ပါ။';
-
-            if (status === 429) {
-                const seconds = Math.max(1, Math.ceil((err.retryAfterMs || PRICE_429_COOLDOWN_MS) / 1000));
-                userMessage =
-                    `⏳ DexScreener က request များနေသဖြင့် ခေတ္တကန့်သတ်ထားပါသည်။ ${seconds} စက္ကန့်ခန့်ကြာပြီး ပြန်စမ်းကြည့်ပါ။`;
-            } else if (isTimeout) {
-                userMessage =
-                    '⏳ ဈေးနှုန်း API တုံ့ပြန်မှု နှေးနေပါသည်။ အနည်းငယ်ကြာပြီး ပြန်စမ်းကြည့်ပါ။';
-            } else if (status >= 500) {
-                userMessage =
-                    '🛠️ ဈေးနှုန်း API server ဘက်တွင် ခေတ္တပြဿနာရှိနေပါသည်။ အနည်းငယ်ကြာပြီး ပြန်စမ်းကြည့်ပါ။';
-            }
-
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                waitingMsg.message_id,
-                null,
-                userMessage
-            ).catch(editErr => {
-                console.error('Failed to edit price error message:', editErr);
+            await ctx.telegram.editMessageText(ctx.chat.id, waitingMsg.message_id, null, priceMessage, {
+                parse_mode: 'Markdown', disable_web_page_preview: true
             });
+        } catch (err) {
+            console.error(`[Price API] ${tokenInfo.name} all sources failed:`, err);
+            await ctx.telegram.editMessageText(
+                ctx.chat.id, waitingMsg.message_id, null,
+                `🚫 ${tokenInfo.name} ဈေးနှုန်းကို DexScreener, GeckoTerminal/CoinGecko နှင့် DeDust တို့မှ ခေတ္တဆွဲယူ၍ မရသေးပါ။`
+            ).catch(editErr => console.error('Failed to edit price error message:', editErr));
         }
     });
 });
