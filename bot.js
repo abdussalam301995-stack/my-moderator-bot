@@ -136,14 +136,15 @@ bot.command('unmute', async (ctx) => {
         ctx.reply('🚫 Unmute လုပ်ရာတွင် အမှားအယွင်းရှိပါသည်။');
     }
 });
-// --- /price Commands (ATF, GRAM, MRG, LOOT, VIC, MAI ဈေးနှုန်းများကြည့်ရန် - Admin Only) ---
+// --- /price Commands (ATF, GRAM, MRG, LOOT, VIC, MAI, VOLT ဈေးနှုန်းများကြည့်ရန် - Admin Only) ---
 const tokenConfigs = {
     atf:  { name: 'ATF',  address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb' },
     gram: { name: 'GRAM', address: 'EQC47093oX5XhbLqYA7V_1LpI_2E-rB10s-v-7fXm_u8B7-x' },
     mrg:  { name: 'MRG',  address: 'EQDj-zlSvj4Au154XjsU7ATzt13p8JjYEs0weVv1rVbCJSn0' },
     loot: { name: 'LOOT', address: 'EQCM4DEzDVFLq7kaSodQX-8-u_aF9M9DDe1EePWsuMozqGkt' },
     vic:  { name: 'VIC',  address: 'EQClb4h8Wnqx-X_sKMFExqxcQusCktlMHxYZ2M80A_WnnFUe' },
-    mai:  { name: 'MAI',  address: 'EQD5pWilwl9ypQ1JFxoDktsQl_LAALALnqHjZoxhx_2nET-r' }
+    mai:  { name: 'MAI',  address: 'EQD5pWilwl9ypQ1JFxoDktsQl_LAALALnqHjZoxhx_2nET-r' },
+    volt: { name: 'VOLT',  address: 'EQAfrRL9Zsaf5j1Aq4InnX4Nuu_GR7e7azUdwLv3A8N3Y2zm' }
 };
 const PRICE_API_TIMEOUT_MS = 10000;
 const PRICE_CACHE_TTL_MS = 30 * 1000;
