@@ -278,13 +278,28 @@ bot.command('unmute', async (ctx) => {
 // Price priority: DeDust V4 enriched pool data, then DexScreener, then GeckoTerminal.
 // GRAM is the renamed native TON coin (1:1), not a separate jetton. The chain remains TON.
 const tokenConfigs = {
-    atf:  { name: 'ATF',  address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb' },
+    atf:  {
+        name: 'ATF', address: 'EQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb',
+        buyUrl: 'https://app.tonkeeper.com/dapp/https%3A%2F%2Fdedust.io%2Fswap%2FGRAM%2FEQANcW45W0Tp91bzvHayaPO6-6hf1Lm4XlWZ4rN6L5ofPWdb',
+        projectUrl: 'https://t.me/ATF_AIRDROP_bot?start=7680002112',
+        buttonName: 'ATF'
+    },
     gram: { name: 'GRAM', address: 'native' },
     mrg:  { name: 'MRG',  address: 'EQDj-zlSvj4Au154XjsU7ATzt13p8JjYEs0weVv1rVbCJSn0' },
-    loot: { name: 'LOOT', address: 'EQCM4DEzDVFLq7kaSodQX-8-u_aF9M9DDe1EePWsuMozqGkt' },
+    loot: {
+        name: 'LOOT', address: 'EQCM4DEzDVFLq7kaSodQX-8-u_aF9M9DDe1EePWsuMozqGkt',
+        buyUrl: 'https://app.tonkeeper.com/dapp/https%3A%2F%2Fdedust.io%2Fswap%2FGRAM%2FEQCM4DEzDVFLq7kaSodQX-8-u_aF9M9DDe1EePWsuMozqGkt',
+        projectUrl: 'https://t.me/LootVaultDexBot?start=ref_7680002112',
+        buttonName: 'Loot'
+    },
     vic:  { name: 'VIC',  address: 'EQClb4h8Wnqx-X_sKMFExqxcQusCktlMHxYZ2M80A_WnnFUe' },
     mai:  { name: 'MAI',  address: 'EQD5pWilwl9ypQ1JFxoDktsQl_LAALALnqHjZoxhx_2nET-r' },
-    volt: { name: 'VOLT', address: 'EQAfrRL9Zsaf5j1Aq4InnX4Nuu_GR7e7azUdwLv3A8N3Y2zm' }
+    volt: {
+        name: 'VOLT', address: 'EQAfrRL9Zsaf5j1Aq4InnX4Nuu_GR7e7azUdwLv3A8N3Y2zm',
+        buyUrl: 'https://app.tonkeeper.com/dapp/https%3A%2F%2Fdedust.io%2Fswap%2FGRAM%2FEQAfrRL9Zsaf5j1Aq4InnX4Nuu_GR7e7azUdwLv3A8N3Y2zm',
+        projectUrl: 'https://t.me/VoltToken_bot?start=ref_7680002112',
+        buttonName: 'Volt'
+    }
 };
 
 const PRICE_API_TIMEOUT_MS = 10000;
@@ -515,13 +530,33 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function deletePriceMessageLater(telegram, chatId, messageId) {
+// Delete BOTH the bot price response and the user's /token command 60 seconds
+// after the response was delivered. A failure deleting one must not block the other.
+// This in-process timer does not persist through Render restarts or service sleep.
+function deletePriceMessagesLater(telegram, chatId, messageIds) {
+    const ids = [...new Set(messageIds.filter(id => Number.isInteger(id)))];
+    if (!ids.length) return;
     const handle = setTimeout(() => {
-        telegram.deleteMessage(chatId, messageId).catch(err =>
-            console.warn('[Price auto-delete] Delete failed (check Delete Messages permission):', err.message)
-        );
+        for (const messageId of ids) {
+            Promise.resolve()
+                .then(() => telegram.deleteMessage(chatId, messageId))
+                .catch(err => console.warn(
+                    `[Price auto-delete] Cannot delete message ${messageId} in chat ${chatId} (check Delete Messages permission):`,
+                    err.message
+                ));
+        }
     }, PRICE_MESSAGE_DELETE_MS);
     if (typeof handle.unref === 'function') handle.unref();
+}
+
+// Telegram inline URL buttons: Buy on the LEFT, project bot on the RIGHT.
+// Other price commands intentionally keep the original button-free layout.
+function priceInlineKeyboard(info) {
+    if (!info.buyUrl || !info.projectUrl || !info.buttonName) return {};
+    return Markup.inlineKeyboard([[
+        Markup.button.url(`🛒 Buy ${info.buttonName}`, info.buyUrl),
+        Markup.button.url(`🪙 ${info.buttonName}`, info.projectUrl)
+    ]]);
 }
 
 for (const command of Object.keys(tokenConfigs)) {
@@ -571,10 +606,11 @@ for (const command of Object.keys(tokenConfigs)) {
                 `💧 Liquidity (${escapeHtml(result.liquidityDescription)}): <b>${formatLiquidity(result.liquidityUsd)}</b>\n` +
                 `📊 24h ပြောင်းလဲမှု: <b>${changeText}</b>\n` +
                 `📡 Source: <b>${escapeHtml(result.source)}</b>\n` +
-                `<a href="${escapeHtml(result.url)}">🔗 DEX တွင်ကြည့်ရန်</a>` +
-                cacheText + '\n\n⏳ ဤ Message ကို 60 စက္ကန့်အကြာတွင် ဖျက်ပါမည်။';
+                (result.url ? `<a href="${escapeHtml(result.url)}">🔗 DEX တွင်ကြည့်ရန်</a>` : '') +
+                cacheText;
             await ctx.telegram.editMessageText(ctx.chat.id, waiting.message_id, undefined, message, {
-                parse_mode: 'HTML', disable_web_page_preview: true
+                parse_mode: 'HTML', disable_web_page_preview: true,
+                ...priceInlineKeyboard(info)
             });
         } catch (error) {
             console.error(`[Price API] ${info.name} failed:`, error.message);
@@ -582,10 +618,13 @@ for (const command of Object.keys(tokenConfigs)) {
                 `🚫 ${info.name} ဈေးနှုန်းကို ယခုဆွဲယူ၍ မရနိုင်ပါ။ နောက်တစ်ကြိမ် ပြန်စမ်းပါ။`
             ).catch(editError => console.error('[Price API] Cannot edit error message:', editError.message));
         } finally {
-            // Schedules deletion of the BOT's response, not the user's command.
-            // Requires Telegram Delete Messages permission in groups; survives neither
-            // process restarts nor server sleep (for guaranteed deletion use persistent jobs).
-            deletePriceMessageLater(ctx.telegram, ctx.chat.id, waiting.message_id);
+            // Start countdown after the bot response finishes. Both messages expire
+            // together; a failed price fetch still cleans up its command and response.
+            // The bot must have Delete Messages permission in the group.
+            deletePriceMessagesLater(ctx.telegram, ctx.chat.id, [
+                waiting.message_id,
+                ctx.message?.message_id
+            ]);
         }
     });
 }
