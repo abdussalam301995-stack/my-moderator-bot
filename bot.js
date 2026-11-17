@@ -293,7 +293,7 @@ const tokenConfigs = {
         buttonName: 'Loot'
     },
     vic:  { name: 'VIC',  address: 'EQClb4h8Wnqx-X_sKMFExqxcQusCktlMHxYZ2M80A_WnnFUe' },
-    mai:  { name: 'MAI',  address: 'EQD5pWilwl9ypQ1JFxoDktsQl_LAALALnqHjZoxhx_2nET-r' },
+    mai:  { name: 'MAI',  address: 'EQD84IHkHMtMJiSmPdLV5RSAoyQfpZpEdCgBTeBr_4t3oATU' },
     volt: {
         name: 'VOLT', address: 'EQAfrRL9Zsaf5j1Aq4InnX4Nuu_GR7e7azUdwLv3A8N3Y2zm',
         buyUrl: 'https://app.tonkeeper.com/dapp/https%3A%2F%2Fdedust.io%2Fswap%2FGRAM%2FEQAfrRL9Zsaf5j1Aq4InnX4Nuu_GR7e7azUdwLv3A8N3Y2zm',
